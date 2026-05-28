@@ -13,8 +13,10 @@ env/
 .mypy_cache/
 .ruff_cache/
 
-# Generated training checkpoints
-models/*checkpoint*.pth
+# Generated training checkpoints and model weights
+models/*.pth
+models/*.pt
+models/*.ckpt
 
 # OS/editor files
 .DS_Store

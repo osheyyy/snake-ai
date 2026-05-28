@@ -8,24 +8,32 @@ import torch.optim as optim
 
 
 class LinearQNet(nn.Module):
-    """Small neural network that estimates Q-values for the three actions."""
+    """Neural network that estimates Q-values for the three actions.
+
+    Architecture:
+        input_size -> 256 -> 256 -> 128 -> 3
+        With ReLU activations after each hidden layer.
+    """
 
     def __init__(
         self,
-        input_size: int = 11,
-        hidden_size_1: int = 128,
-        hidden_size_2: int = 128,
+        input_size: int,
+        hidden_size_1: int = 256,
+        hidden_size_2: int = 256,
+        hidden_size_3: int = 128,
         output_size: int = 3,
     ) -> None:
         super().__init__()
         self.linear1 = nn.Linear(input_size, hidden_size_1)
         self.linear2 = nn.Linear(hidden_size_1, hidden_size_2)
-        self.linear3 = nn.Linear(hidden_size_2, output_size)
+        self.linear3 = nn.Linear(hidden_size_2, hidden_size_3)
+        self.linear4 = nn.Linear(hidden_size_3, output_size)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = torch.relu(self.linear1(x))
         x = torch.relu(self.linear2(x))
-        return self.linear3(x)
+        x = torch.relu(self.linear3(x))
+        return self.linear4(x)
 
     def save(self, file_path: str | Path) -> None:
         file_path = Path(file_path)

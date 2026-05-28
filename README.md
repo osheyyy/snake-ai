@@ -10,7 +10,8 @@ Pygame is only used when you watch the trained agent play.
 ```text
 snake-ai/
   models/
-    snake_dqn.pth
+    snake_dqn_simple.pth
+    snake_dqn_grid.pth
   src/
     agent.py
     model.py
@@ -54,80 +55,95 @@ pip install -r requirements.txt
 
 ## Train The Agent
 
-Train for the default 1000 games:
+The training script `src/train.py` supports multiple state modes, device routing, and custom hyperparameters.
 
+### State Modes
+- `--state-mode simple` (default): Hand-crafted 11-value local feature vector. Compact and extremely fast to train. Saves to `models/snake_dqn_simple.pth`.
+- `--state-mode grid`: Full-board vision vector (size 400 for a 20x20 board) representing every cell normalized (0.0: empty, 0.33: body, 0.66: head, 1.0: food). Saves to `models/snake_dqn_grid.pth`. Resuming from a checkpoint automatically checks compatibility.
+
+### Commands
+
+**Train locally in simple mode (default 1000 games):**
 ```bash
 python src/train.py
 ```
 
-Train for a custom number of games:
-
+**Train on Google Colab (high-speed GPU training in grid mode):**
 ```bash
-python src/train.py --games 2000
+python src/train.py --state-mode grid --games 20000 --no-plot --device cuda
 ```
 
-Run training without the live matplotlib chart:
-
+**Train with custom batch sizes and checkpoints:**
 ```bash
-python src/train.py --no-plot
+python src/train.py --state-mode grid --games 5000 --batch-size 1000 --checkpoint-every 1000 --no-plot
 ```
 
-If `models/snake_dqn.pth` already exists, training automatically tries to load
-it before starting. The best model is saved back to the same path when the record
-score improves.
-
-The best model is saved to:
-
-```text
-models/snake_dqn.pth
-```
-
-Training prints a rolling average score every 100 games so you can see whether
-learning is improving over time.
-
-Training also saves periodic checkpoints every 500 games:
-
-```text
-models/snake_dqn_checkpoint_500.pth
-models/snake_dqn_checkpoint_1000.pth
-```
+### Save Locations and Checkpoints
+- The best model is saved to `models/snake_dqn_simple.pth` or `models/snake_dqn_grid.pth` depending on the `--state-mode`.
+- Periodic checkpoints are saved every N games (configured by `--checkpoint-every`, default 500) under:
+  ```text
+  models/snake_dqn_simple_checkpoint_500.pth
+  models/snake_dqn_grid_checkpoint_1000.pth
+  ```
+- Resuming automatically detects shape/state_mode mismatches in checkpoints and warns before starting fresh to prevent crashes.
 
 ## Watch The AI Play
 
-After training, run:
+Watch the trained Agent play in Pygame.
 
+**Watch local play in simple mode:**
 ```bash
-python src/play.py
+python src/play.py --state-mode simple
 ```
 
-Change playback speed:
-
+**Watch local play in grid mode (CPU laptop-friendly):**
 ```bash
-python src/play.py --speed 40
+python src/play.py --state-mode grid --model-path models/snake_dqn_grid.pth --device cpu
+```
+
+**Change playback speed:**
+```bash
+python src/play.py --state-mode grid --speed 40
 ```
 
 ## How It Works
 
-The agent observes an 11-value state, including nearby collision danger, current
-direction, and food position. It chooses one of three relative actions:
+The project implements a deep reinforcement learning agent using Q-learning.
 
-```text
-0 = go straight
-1 = turn right
-2 = turn left
-```
+### State Modes
+1. **Simple Mode**:
+   The agent observes an 11-value state vector including:
+   - Nearby collision danger in three directions (straight, right, left)
+   - Current direction vectors (moving right, left, up, down)
+   - Relative food position (food left, right, up, down)
+2. **Grid Mode**:
+   The agent observes a full-board vision state (e.g. 400 inputs for a 20x20 board) representing every cell:
+   - `0.0` = empty space
+   - `0.33` = snake body segment
+   - `0.66` = snake head
+   - `1.0` = food
 
-Rewards are simple:
+### Actions
+At each step, the agent chooses one of three relative actions:
+- `0` = go straight
+- `1` = turn right
+- `2` = turn left
 
-```text
-+10    eat food
--10    die or get stuck too long
--0.01  every move
-+0.05  move closer to food
--0.05  move farther from food
-```
+### Rewards
+- `+10.0` for eating food.
+- `-10.0` for dying (crashing into a wall, tail, or starvation timeout).
+- `-0.01` per move to encourage fast paths.
+- **Simple Mode Only**: Small auxiliary rewards are added to guide the snake:
+  - `+0.05` for moving closer to food
+  - `-0.05` for moving farther from food
 
-Episodes also end when the snake spends more than `100 * len(snake)` frames
-without making progress. During training, the agent uses epsilon-greedy
-exploration and replay memory. The neural network has two hidden layers
-(`11 -> 128 -> 128 -> 3`) and learns Q-values for each action.
+### Starvation Timeout
+Episodes automatically terminate with a `-10` penalty if the snake goes more than `100 * len(snake)` steps without eating. This prevents loops where the snake circles endlessly.
+
+### Network Architecture
+The agent uses a Deep Q-Network (DQN) with a multi-layer perceptron (MLP) architecture:
+`input_size -> 256 -> 256 -> 128 -> 3` (ReLU activations between hidden layers).
+- For simple mode, `input_size = 11`.
+- For grid mode, `input_size = width * height` (e.g., 400).
+
+Training leverages high-performance GPUs (via CUDA) to compute gradient descents on large batches of experiences. Playback runs on lightweight CPU structures via safe model tensor mapping.

@@ -44,12 +44,14 @@ class SnakeGame:
         block_size: int = 24,
         render: bool = False,
         speed: int = 30,
+        state_mode: str = "simple",
     ) -> None:
         self.width = width
         self.height = height
         self.block_size = block_size
         self.render = render
         self.speed = speed
+        self.state_mode = state_mode
 
         self._pygame = None
         self.display = None
@@ -124,8 +126,12 @@ class SnakeGame:
             self._place_food()
         else:
             self.snake.pop()
-            new_distance = self._distance_to_food(self.head)
-            reward += CLOSER_REWARD if new_distance < previous_distance else FARTHER_REWARD
+            # Closer/farther feedback reward is only given in simple mode
+            # to keep simple mode training fast while letting grid mode learn
+            # purely from food consumption, survival, and movement efficiency.
+            if self.state_mode == "simple":
+                new_distance = self._distance_to_food(self.head)
+                reward += CLOSER_REWARD if new_distance < previous_distance else FARTHER_REWARD
 
         if self.render:
             self._update_ui()
@@ -133,31 +139,70 @@ class SnakeGame:
 
         return reward, False, self.score
 
-    def get_state(self) -> list[int]:
-        """Return the required 11-value numeric state vector."""
+    def get_state(self) -> list[int] | list[float]:
+        """Return the environment state based on the selected state mode.
 
-        point_straight = self._next_point_for_action(0)
-        point_right = self._next_point_for_action(1)
-        point_left = self._next_point_for_action(2)
+        State Modes:
+            - simple: A hand-crafted 11-value feature vector representing directions,
+                      immediate collision danger in 3 directions (straight, right, left),
+                      and relative food position. This is a very localized, small view of
+                      the immediate surroundings.
+            - grid: A full-board vision vector where every cell of the grid is represented
+                    by a normalized float value:
+                        0.0  = empty cell
+                        0.33 = snake body segment
+                        0.66 = snake head
+                        1.0  = food
+                    This is flattened into a 1D vector of size (width * height). For a
+                    20x20 board, the input size is 400. This provides the snake with
+                    full-board vision, allowing it to navigate complex tail shapes and
+                    plan long-term paths, which a simple 11-value local state cannot do.
+        """
+        if self.state_mode == "simple":
+            point_straight = self._next_point_for_action(0)
+            point_right = self._next_point_for_action(1)
+            point_left = self._next_point_for_action(2)
 
-        moving_left = self.direction == Direction.LEFT
-        moving_right = self.direction == Direction.RIGHT
-        moving_up = self.direction == Direction.UP
-        moving_down = self.direction == Direction.DOWN
+            moving_left = self.direction == Direction.LEFT
+            moving_right = self.direction == Direction.RIGHT
+            moving_up = self.direction == Direction.UP
+            moving_down = self.direction == Direction.DOWN
 
-        return [
-            int(self.is_collision(point_straight)),
-            int(self.is_collision(point_right)),
-            int(self.is_collision(point_left)),
-            int(moving_left),
-            int(moving_right),
-            int(moving_up),
-            int(moving_down),
-            int(self.food.x < self.head.x),
-            int(self.food.x > self.head.x),
-            int(self.food.y < self.head.y),
-            int(self.food.y > self.head.y),
-        ]
+            return [
+                int(self.is_collision(point_straight)),
+                int(self.is_collision(point_right)),
+                int(self.is_collision(point_left)),
+                int(moving_left),
+                int(moving_right),
+                int(moving_up),
+                int(moving_down),
+                int(self.food.x < self.head.x),
+                int(self.food.x > self.head.x),
+                int(self.food.y < self.head.y),
+                int(self.food.y > self.head.y),
+            ]
+        elif self.state_mode == "grid":
+            # Initialize a grid of zeros (empty cells) representing the board
+            # Flattened using row-major ordering: y * width + x
+            grid = [0.0] * (self.width * self.height)
+
+            # Fill in the snake body (excluding the head which is the first element)
+            # Body is represented by 0.33
+            for segment in self.snake[1:]:
+                if 0 <= segment.x < self.width and 0 <= segment.y < self.height:
+                    grid[segment.y * self.width + segment.x] = 0.33
+
+            # Fill in the snake head (represented by 0.66)
+            if 0 <= self.head.x < self.width and 0 <= self.head.y < self.height:
+                grid[self.head.y * self.width + self.head.x] = 0.66
+
+            # Fill in the food (represented by 1.0)
+            if self.food and 0 <= self.food.x < self.width and 0 <= self.food.y < self.height:
+                grid[self.food.y * self.width + self.food.x] = 1.0
+
+            return grid
+        else:
+            raise ValueError(f"Unknown state mode: {self.state_mode}")
 
     def is_collision(self, point: Point | None = None) -> bool:
         if point is None:
