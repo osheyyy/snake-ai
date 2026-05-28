@@ -121,6 +121,42 @@ class Agent:
         self.model.train(was_training)
         return int(torch.argmax(prediction).item())
 
+    def get_actions(self, states: list[list[int] | list[float]], explore: bool = True) -> list[int]:
+        """Choose actions for a batch of states concurrently.
+
+        This optimizes performance by grouping all states requiring neural network exploitation
+        into a single PyTorch tensor. The model executes them in a single batch forward pass,
+        which is highly efficient for hardware acceleration (like CUDA on Colab). Epsilon-greedy
+        decisions are evaluated independently for each state.
+        """
+        self.epsilon = max(self.epsilon_end, self.epsilon_start - self.epsilon_decay * self.n_games)
+
+        actions = [0] * len(states)
+        exploit_indices = []
+        exploit_states = []
+
+        for idx, state in enumerate(states):
+            if explore and random.random() < self.epsilon:
+                actions[idx] = random.randint(0, 2)
+            else:
+                exploit_indices.append(idx)
+                exploit_states.append(state)
+
+        # Batch model inference for all environments requiring exploitation
+        if exploit_states:
+            state_tensor = torch.tensor(exploit_states, dtype=torch.float, device=self.device)
+            was_training = self.model.training
+            self.model.eval()
+            with torch.no_grad():
+                predictions = self.model(state_tensor)
+            self.model.train(was_training)
+
+            predicted_actions = torch.argmax(predictions, dim=1).cpu().tolist()
+            for idx, action in zip(exploit_indices, predicted_actions):
+                actions[idx] = int(action)
+
+        return actions
+
     def save_model(self, file_path: str | Path) -> None:
         """Save the network weights along with diagnostic training metadata."""
         file_path = Path(file_path)

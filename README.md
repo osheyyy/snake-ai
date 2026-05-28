@@ -55,27 +55,30 @@ pip install -r requirements.txt
 
 ## Train The Agent
 
-The training script `src/train.py` supports multiple state modes, device routing, and custom hyperparameters.
+The training script `src/train.py` supports multiple state modes, device routing, vectorized environment batching, and custom hyperparameters.
 
 ### State Modes
 - `--state-mode simple` (default): Hand-crafted 11-value local feature vector. Compact and extremely fast to train. Saves to `models/snake_dqn_simple.pth`.
 - `--state-mode grid`: Full-board vision vector (size 400 for a 20x20 board) representing every cell normalized (0.0: empty, 0.33: body, 0.66: head, 1.0: food). Saves to `models/snake_dqn_grid.pth`. Resuming from a checkpoint automatically checks compatibility.
 
+### Parallel Vectorized Environments
+- `--num-envs` (default 1): Collects experiences faster by running multiple environments concurrently. Epsilon exploration is processed independently, while model inference and short-memory training are fully batched into single PyTorch tensor operations. Note that this is vectorized training batching, not OS-level multiprocessing.
+
 ### Commands
 
-**Train locally in simple mode (default 1000 games):**
+**Train locally in simple mode (default 1000 games, single environment):**
 ```bash
 python src/train.py
 ```
 
-**Train on Google Colab (high-speed GPU training in grid mode):**
+**Train on Google Colab (high-speed GPU batch training in grid mode with 16 parallel environments):**
 ```bash
-python src/train.py --state-mode grid --games 20000 --no-plot --device cuda
+python src/train.py --state-mode grid --games 20000 --num-envs 16 --device cuda --no-plot
 ```
 
-**Train with custom batch sizes and checkpoints:**
+**Train with custom batch sizes, environments, and checkpoints:**
 ```bash
-python src/train.py --state-mode grid --games 5000 --batch-size 1000 --checkpoint-every 1000 --no-plot
+python src/train.py --state-mode grid --games 5000 --num-envs 8 --batch-size 1000 --checkpoint-every 1000 --no-plot
 ```
 
 ### Save Locations and Checkpoints

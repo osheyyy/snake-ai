@@ -40,6 +40,7 @@ def train(
     device: str,
     batch_size: int,
     checkpoint_every: int,
+    num_envs: int = 1,
     plot: bool = True,
 ) -> None:
     scores = []
@@ -56,66 +57,150 @@ def train(
     
     resume_if_available(agent, model_path)
     
-    # Instantiate Game with matching state mode
-    game = SnakeGame(render=False, state_mode=state_mode)
+    if num_envs == 1:
+        # Keep original single environment training loop behavior
+        game = SnakeGame(render=False, state_mode=state_mode)
+        try:
+            while agent.n_games < num_games:
+                state_old = agent.get_state(game)
+                action = agent.get_action(state_old, explore=True)
 
-    try:
-        while agent.n_games < num_games:
-            state_old = agent.get_state(game)
-            action = agent.get_action(state_old, explore=True)
+                reward, done, score = game.play_step(action)
+                state_new = agent.get_state(game)
 
-            reward, done, score = game.play_step(action)
-            state_new = agent.get_state(game)
+                # Short memory trains on the single transition that just happened.
+                agent.train_short_memory(state_old, action, reward, state_new, done)
+                agent.remember(state_old, action, reward, state_new, done)
 
-            # Short memory trains on the single transition that just happened.
-            agent.train_short_memory(state_old, action, reward, state_new, done)
-            agent.remember(state_old, action, reward, state_new, done)
+                if done:
+                    game.reset()
+                    agent.n_games += 1
 
-            if done:
-                game.reset()
-                agent.n_games += 1
+                    # Long memory trains on a random batch from replay memory.
+                    agent.train_long_memory()
 
-                # Long memory trains on a random batch from replay memory.
-                agent.train_long_memory()
+                    if score > record:
+                        record = score
+                        agent.save_model(model_path)
+                        print(f"New Record! Saved best model to {model_path}")
 
-                if score > record:
-                    record = score
-                    agent.save_model(model_path)
-                    print(f"New Record! Saved best model to {model_path}")
+                    if agent.n_games % checkpoint_every == 0:
+                        checkpoint_path = checkpoint_path_for(model_path, agent.n_games)
+                        agent.save_model(checkpoint_path)
+                        print(f"Saved periodic checkpoint to {checkpoint_path}")
 
-                if agent.n_games % checkpoint_every == 0:
-                    checkpoint_path = checkpoint_path_for(model_path, agent.n_games)
-                    agent.save_model(checkpoint_path)
-                    print(f"Saved periodic checkpoint to {checkpoint_path}")
-
-                total_score += score
-                mean_score = total_score / agent.n_games
-                scores.append(score)
-                mean_scores.append(mean_score)
-                rolling_average = sum(scores[-ROLLING_AVERAGE_INTERVAL:]) / min(
-                    len(scores),
-                    ROLLING_AVERAGE_INTERVAL,
-                )
-
-                print(
-                    f"Game {agent.n_games} | "
-                    f"Score {score} | "
-                    f"Record {record} | "
-                    f"Epsilon {agent.epsilon:.3f}"
-                )
-
-                if agent.n_games % ROLLING_AVERAGE_INTERVAL == 0:
-                    print(
-                        f"--- Last {ROLLING_AVERAGE_INTERVAL} games "
-                        f"average score: {rolling_average:.2f} ---"
+                    total_score += score
+                    mean_score = total_score / agent.n_games
+                    scores.append(score)
+                    mean_scores.append(mean_score)
+                    rolling_average = sum(scores[-ROLLING_AVERAGE_INTERVAL:]) / min(
+                        len(scores),
+                        ROLLING_AVERAGE_INTERVAL,
                     )
 
-                if plot:
-                    plot_scores(scores, mean_scores)
-    except KeyboardInterrupt:
-        print("\nTraining stopped by user.")
-    finally:
-        game.close()
+                    print(
+                        f"Game {agent.n_games} | "
+                        f"Score {score} | "
+                        f"Record {record} | "
+                        f"Epsilon {agent.epsilon:.3f}"
+                    )
+
+                    if agent.n_games % ROLLING_AVERAGE_INTERVAL == 0:
+                        print(
+                            f"--- Last {ROLLING_AVERAGE_INTERVAL} games "
+                            f"average score: {rolling_average:.2f} ---"
+                        )
+
+                    if plot:
+                        plot_scores(scores, mean_scores)
+        except KeyboardInterrupt:
+            print("\nTraining stopped by user.")
+        finally:
+            game.close()
+    else:
+        # Vectorized/parallelized environment training style batching
+        envs = [SnakeGame(render=False, state_mode=state_mode) for _ in range(num_envs)]
+        try:
+            while agent.n_games < num_games:
+                # 1. Batch state extraction from all parallel environment instances
+                states_old = [envs[i].get_state() for i in range(num_envs)]
+                
+                # 2. Batch action prediction in one single neural net tensor pass
+                actions = agent.get_actions(states_old, explore=True)
+                
+                rewards = []
+                dones = []
+                states_new = []
+                
+                # 3. Step all environments concurrently
+                for i in range(num_envs):
+                    reward, done, score = envs[i].play_step(actions[i])
+                    state_new = envs[i].get_state()
+                    
+                    rewards.append(reward)
+                    dones.append(done)
+                    states_new.append(state_new)
+                
+                # 4. Train short memory as a single combined batch of N transitions
+                agent.train_short_memory(states_old, actions, rewards, states_new, dones)
+                
+                # 5. Append all transitions to the experience replay memory
+                for i in range(num_envs):
+                    agent.remember(states_old[i], actions[i], rewards[i], states_new[i], dones[i])
+                    
+                    # 6. Process game completions sequentially as they occur
+                    if dones[i]:
+                        score = envs[i].score
+                        envs[i].reset()
+                        agent.n_games += 1
+                        
+                        # Trigger long memory replay training
+                        agent.train_long_memory()
+                        
+                        # Update performance records and save best models
+                        if score > record:
+                            record = score
+                            agent.save_model(model_path)
+                            print(f"New Record! Saved best model to {model_path}")
+                            
+                        if agent.n_games % checkpoint_every == 0:
+                            checkpoint_path = checkpoint_path_for(model_path, agent.n_games)
+                            agent.save_model(checkpoint_path)
+                            print(f"Saved periodic checkpoint to {checkpoint_path}")
+                            
+                        total_score += score
+                        mean_score = total_score / agent.n_games
+                        scores.append(score)
+                        mean_scores.append(mean_score)
+                        rolling_average = sum(scores[-ROLLING_AVERAGE_INTERVAL:]) / min(
+                            len(scores),
+                            ROLLING_AVERAGE_INTERVAL,
+                        )
+                        
+                        print(
+                            f"Game {agent.n_games} | "
+                            f"Score {score} | "
+                            f"Record {record} | "
+                            f"Epsilon {agent.epsilon:.3f}"
+                        )
+                        
+                        if agent.n_games % ROLLING_AVERAGE_INTERVAL == 0:
+                            print(
+                                f"--- Last {ROLLING_AVERAGE_INTERVAL} games "
+                                f"average score: {rolling_average:.2f} ---"
+                            )
+                            
+                        if plot:
+                            plot_scores(scores, mean_scores)
+                            
+                        # Terminate early if target game count is reached within loop
+                        if agent.n_games >= num_games:
+                            break
+        except KeyboardInterrupt:
+            print("\nTraining stopped by user.")
+        finally:
+            for env in envs:
+                env.close()
 
 
 def parse_args() -> argparse.Namespace:
@@ -137,6 +222,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1000,
         help="Number of games to train.",
+    )
+    parser.add_argument(
+        "--num-envs",
+        type=int,
+        default=1,
+        help="Number of parallel environments to step and collect training experiences concurrently.",
     )
     parser.add_argument(
         "--batch-size",
@@ -183,5 +274,6 @@ if __name__ == "__main__":
         device=args.device,
         batch_size=args.batch_size,
         checkpoint_every=args.checkpoint_every,
+        num_envs=args.num_envs,
         plot=not args.no_plot,
     )
