@@ -82,6 +82,9 @@ The best model is saved to:
 models/snake_dqn.pth
 ```
 
+Training prints a rolling average score every 100 games so you can see whether
+learning is improving over time.
+
 Training also saves periodic checkpoints every 500 games:
 
 ```text

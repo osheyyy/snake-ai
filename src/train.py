@@ -11,6 +11,7 @@ from utils import plot_scores
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "snake_dqn.pth"
 CHECKPOINT_INTERVAL = 500
+ROLLING_AVERAGE_INTERVAL = 100
 
 
 def checkpoint_path_for(model_path: Path, game_number: int) -> Path:
@@ -75,6 +76,10 @@ def train(num_games: int, model_path: Path, plot: bool = True) -> None:
                 mean_score = total_score / agent.n_games
                 scores.append(score)
                 mean_scores.append(mean_score)
+                rolling_average = sum(scores[-ROLLING_AVERAGE_INTERVAL:]) / min(
+                    len(scores),
+                    ROLLING_AVERAGE_INTERVAL,
+                )
 
                 print(
                     f"Game {agent.n_games} "
@@ -82,6 +87,12 @@ def train(num_games: int, model_path: Path, plot: bool = True) -> None:
                     f"Record {record} "
                     f"Epsilon {agent.epsilon:.3f}"
                 )
+
+                if agent.n_games % ROLLING_AVERAGE_INTERVAL == 0:
+                    print(
+                        f"Last {ROLLING_AVERAGE_INTERVAL} games "
+                        f"average score: {rolling_average:.2f}"
+                    )
 
                 if plot:
                     plot_scores(scores, mean_scores)

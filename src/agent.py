@@ -26,7 +26,7 @@ class Agent:
         self.epsilon = 1.0
         self.epsilon_start = 1.0
         self.epsilon_end = 0.05
-        self.epsilon_decay = 0.0005
+        self.epsilon_decay = 0.001
         self.gamma = 0.9
         self.memory = deque(maxlen=MAX_MEMORY)
 
