@@ -72,10 +72,21 @@ Run training without the live matplotlib chart:
 python src/train.py --no-plot
 ```
 
+If `models/snake_dqn.pth` already exists, training automatically tries to load
+it before starting. The best model is saved back to the same path when the record
+score improves.
+
 The best model is saved to:
 
 ```text
 models/snake_dqn.pth
+```
+
+Training also saves periodic checkpoints every 500 games:
+
+```text
+models/snake_dqn_checkpoint_500.pth
+models/snake_dqn_checkpoint_1000.pth
 ```
 
 ## Watch The AI Play
@@ -106,12 +117,14 @@ direction, and food position. It chooses one of three relative actions:
 Rewards are simple:
 
 ```text
-+10  eat food
--10  die
-+0.1 move closer to food
--0.1 move farther from food
++10    eat food
+-10    die or get stuck too long
+-0.01  every move
++0.05  move closer to food
+-0.05  move farther from food
 ```
 
-During training, the agent uses epsilon-greedy exploration and replay memory.
-The neural network learns Q-values for each action and saves the best model when
-the score improves.
+Episodes also end when the snake spends more than `100 * len(snake)` frames
+without making progress. During training, the agent uses epsilon-greedy
+exploration and replay memory. The neural network has two hidden layers
+(`11 -> 128 -> 128 -> 3`) and learns Q-values for each action.

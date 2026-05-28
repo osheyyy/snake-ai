@@ -25,13 +25,13 @@ class Agent:
         self.n_games = 0
         self.epsilon = 1.0
         self.epsilon_start = 1.0
-        self.epsilon_end = 0.01
-        self.epsilon_decay = 0.005
+        self.epsilon_end = 0.05
+        self.epsilon_decay = 0.0005
         self.gamma = 0.9
         self.memory = deque(maxlen=MAX_MEMORY)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = LinearQNet(11, 256, 3).to(self.device)
+        self.model = LinearQNet(11, 128, 128, 3).to(self.device)
         self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma, device=self.device)
 
     def get_state(self, game) -> list[int]:

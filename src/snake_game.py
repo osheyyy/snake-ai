@@ -22,6 +22,12 @@ DIRECTION_VECTORS = {
     Direction.DOWN: Point(0, 1),
 }
 
+FOOD_REWARD = 10.0
+DEATH_REWARD = -10.0
+MOVE_PENALTY = -0.01
+CLOSER_REWARD = 0.05
+FARTHER_REWARD = -0.05
+
 
 class SnakeGame:
     """Grid-based Snake environment.
@@ -76,6 +82,7 @@ class SnakeGame:
             Point(self.head.x - 2, self.head.y),
         ]
         self.score = 0
+        self.frame_iteration = 0
         self.food = None
         self._place_food()
 
@@ -101,21 +108,24 @@ class SnakeGame:
         if self.render:
             self._handle_events()
 
+        self.frame_iteration += 1
+
         previous_distance = self._distance_to_food(self.head)
         self._move(action)
         self.snake.insert(0, self.head)
 
-        if self.is_collision():
-            return -10.0, True, self.score
+        if self.is_collision() or self.frame_iteration > 100 * len(self.snake):
+            return DEATH_REWARD, True, self.score
 
+        reward = MOVE_PENALTY
         if self.head == self.food:
             self.score += 1
-            reward = 10.0
+            reward += FOOD_REWARD
             self._place_food()
         else:
             self.snake.pop()
             new_distance = self._distance_to_food(self.head)
-            reward = 0.1 if new_distance < previous_distance else -0.1
+            reward += CLOSER_REWARD if new_distance < previous_distance else FARTHER_REWARD
 
         if self.render:
             self._update_ui()

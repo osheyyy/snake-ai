@@ -13,6 +13,9 @@ env/
 .mypy_cache/
 .ruff_cache/
 
+# Generated training checkpoints
+models/*checkpoint*.pth
+
 # OS/editor files
 .DS_Store
 Thumbs.db

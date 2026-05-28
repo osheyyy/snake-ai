@@ -10,6 +10,27 @@ from utils import plot_scores
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "snake_dqn.pth"
+CHECKPOINT_INTERVAL = 500
+
+
+def checkpoint_path_for(model_path: Path, game_number: int) -> Path:
+    return model_path.with_name(f"{model_path.stem}_checkpoint_{game_number}{model_path.suffix}")
+
+
+def resume_if_available(agent: Agent, model_path: Path) -> bool:
+    if not model_path.exists():
+        return False
+
+    try:
+        agent.load_model(model_path)
+    except (RuntimeError, OSError, ValueError):
+        print(f"Could not resume from {model_path}. The checkpoint is incompatible or unreadable.")
+        print("Starting with a fresh model.")
+        return False
+
+    agent.model.train()
+    print(f"Resumed model from {model_path}")
+    return True
 
 
 def train(num_games: int, model_path: Path, plot: bool = True) -> None:
@@ -19,6 +40,7 @@ def train(num_games: int, model_path: Path, plot: bool = True) -> None:
     record = -1
 
     agent = Agent()
+    resume_if_available(agent, model_path)
     game = SnakeGame(render=False)
 
     try:
@@ -43,6 +65,11 @@ def train(num_games: int, model_path: Path, plot: bool = True) -> None:
                 if score > record:
                     record = score
                     agent.save_model(model_path)
+
+                if agent.n_games % CHECKPOINT_INTERVAL == 0:
+                    checkpoint_path = checkpoint_path_for(model_path, agent.n_games)
+                    agent.save_model(checkpoint_path)
+                    print(f"Saved checkpoint to {checkpoint_path}")
 
                 total_score += score
                 mean_score = total_score / agent.n_games
